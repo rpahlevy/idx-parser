@@ -1,11 +1,21 @@
 import openpyxl
-import argparse
+import click
 import sys
+import firebase_admin
+from firebase_admin import credentials, firestore
 
-# Load the workbook and select the active sheet
-# file_path = 'xlsx/IDX HIDIV20 - Jan 2024.xlsx'
-# workbook = openpyxl.load_workbook(file_path)
-# sheet = workbook.active
+# Replace with your service account key path
+cred = credentials.Certificate('cred.json')
+firebase_admin.initialize_app(cred)
+db = firestore.client()
+
+_indices = [
+  'IDXHIDIV20',
+  'ISSI',
+  'JII',
+  'JII70',
+  'LQ45',
+]
 
 # Function to dynamically detect and extract table data
 def extract_table_data(sheet):
@@ -22,26 +32,55 @@ def extract_table_data(sheet):
           
   return table_data
 
-# Main function to handle the script logic
-def main():
-  parser = argparse.ArgumentParser(description='Extract table data from an Excel file.')
-  parser.add_argument('file_path', nargs='?', help='Path to the Excel file')
-  args = parser.parse_args()
-  
-  if not args.file_path:
-    print('Warning: No file path specified.')
+@click.command()
+def indices():
+  doc_ref = db.collection('indices')
+  docs = doc_ref.stream()
+  for doc in docs:
+    print(f'{doc.id}')
+
+# Command to extract data from Excel file
+@click.command()
+@click.option('--index', required=True, type=click.Choice(_indices, case_sensitive=False), help='The indices name')
+@click.option('--file', required=True, type=click.Path(exists=True), help='Path to the Excel file to extract data from')
+@click.option('--sync', is_flag=True, prompt='Sync result to Firestore?', help='Sync to Firestore')
+def extract(index, file, sync):
+  try:
+    workbook = openpyxl.load_workbook(file)
+    sheet = workbook.active
+    data = extract_table_data(sheet)
+    companies = []
+    
+    for row in data:
+      companies.append(row[2])
+
+    print(index)
+    print(companies)
+
+    # Upload data to Firestore
+    if sync:
+      print('Sync to Firestore...')
+      store_data_in_firestore(companies, index)
+  except Exception as e:
+    print(f"Error: {e}")
     sys.exit(1)
-  
-  # Load the workbook and select the active sheet
-  workbook = openpyxl.load_workbook(args.file_path)
-  sheet = workbook.active
-  
-  # Extract the data
-  data = extract_table_data(sheet)
-  
-  # Print the data
-  for row in data:
-    print(row)
+
+def store_data_in_firestore(data, index):
+  """Stores the extracted data in a Firestore collection."""
+  collection_name = 'indices'
+  doc_ref = db.collection(collection_name).document(f'{index}')  # Generate document ID with index
+  doc_ref.update({
+    'companies': data
+  })
+
+@click.group()
+def cli():
+  pass
+
+cli.add_command(extract)
+cli.add_command(indices)
+# cli.add_command(clear_db)
+# cli.add_command(parse_sync_db)
 
 if __name__ == '__main__':
-  main()
+  cli()

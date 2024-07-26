@@ -6,6 +6,8 @@ name = "pypi"
 [packages]
 pdfplumber = "*"
 openpyxl = "*"
+click = "*"
+firebase-admin = "*"
 
 [dev-packages]
 
